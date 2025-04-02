@@ -4,6 +4,8 @@ import time
 import requests
 import yt_dlp
 import subprocess
+import re
+from google import generativeai as genai
 from dotenv import load_dotenv
 
 
@@ -152,3 +154,37 @@ def poll_transcription(api_key, transcript_id, audio_file):
 
         time.sleep(1)
 
+@yvs_bp.route('/get-youtube-video-summary', methods=['POST'])
+def get_summary_of_the_video():
+    print(request.get_json())
+    if(not request.is_json):
+        return jsonify({'error', "Request must be in json format"}),400
+    
+    data = request.get_json()
+    prompt = f''' 
+        You are a smart assistant that summarizes videos or articles into short, well-structured HTML summaries.
+        Please read the following content (it may be plain text or HTML), and return a clean HTML summary.
+        ✅ Guidelines:
+        - Start the summary with: **"In this video..."**
+        - Provide a comprehensive summary that captures key points, structure, and insights
+        - Bullets are must such that highlighting each n every aspect
+        - Use proper HTML formatting like `<p>`, `<ul>`, `<li>`, etc.
+        - Do **not** include `<html>`, `<body>`, or script/style tags — only the inner content.
+        - Ensure the output is **safe to inject using `dangerouslySetInnerHTML` in React**.
+        - Do **not** add extra commentary or explanation.
+        📄 Content to summarize:
+        """
+        {data['content']}
+        """
+    '''
+    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    summarization = model.generate_content(prompt).text
+    cleanedSummarization = strip_summary_markdowns(summarization)
+
+    return jsonify({
+        "summary":cleanedSummarization        
+    }), 200
+
+def strip_summary_markdowns(changed_code:str):
+    return re.sub(r"```[\s\S]*?\n([\s\S]*?)```", r"\1", changed_code)
