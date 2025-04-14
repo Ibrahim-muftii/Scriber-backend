@@ -1,13 +1,10 @@
-from flask import Blueprint, request, jsonify
 import os
-import time
-import requests
 import yt_dlp
-import subprocess
 import re
+from flask import Blueprint, request, jsonify,after_this_request
 from google import generativeai as genai
 from dotenv import load_dotenv
-
+from faster_whisper import WhisperModel as ws
 
 load_dotenv()
 yvs_bp = Blueprint('yvs_bp', __name__)
@@ -31,28 +28,19 @@ def get_transcription():
         if not youtube_url:
             return jsonify({'error': 'YouTube URL is required'}), 400
 
-        video_path, video_title, thumbnail_url, embeded_url = download_youtube_video(youtube_url)
-        if not video_path:
+        audio_path, video_title, thumbnail_url, embeded_url = download_youtube_video(youtube_url)
+        if not audio_path:
             return jsonify({'error': 'Failed to download video'}), 500
+        transcription_text = trancribe_video(audio_path)
 
-
-        audio_file = extract_audio_with_ffmpeg(video_path)
-        if not audio_file:
-            return jsonify({'error': 'Failed to extract audio'}), 500
-
-
-        upload_url = upload_audio(os.getenv('ASSEMBLY_AI_API_KEY'), audio_file)
-        if not upload_url:
-            return jsonify({'error': 'Failed to upload audio'}), 500
-
-
-        transcript_id = request_transcription(os.getenv('ASSEMBLY_AI_API_KEY'), upload_url)
-        if not transcript_id:
-            return jsonify({'error': 'Failed to request transcription'}), 500
-
-
-        transcription_text = poll_transcription(os.getenv('ASSEMBLY_AI_API_KEY'), transcript_id, audio_file)
-
+        @after_this_request
+        def cleanUp(response):
+            try:
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+            except Exception as cleanup_error:
+                print(f"Error deleting audio file: {cleanup_error}")
+            return response
 
         return jsonify({
             'status': 'success',
@@ -71,112 +59,70 @@ def download_youtube_video(url, output_path='videos'):
         os.makedirs(output_path)
 
     ydl_opts = {
-        'format': 'worstvideo+bestaudio/best',
-        'outtmpl': os.path.join(output_path, 'video.%(ext)s'),
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(output_path, 'audio.%(ext)s'),
         'noplaylist': True,
-        'verbose': True,
-        'merge_output_format': 'mp4',
         'cookiefile': 'cookies.txt',
-        'postprocessor_args': ['-strict', '-2']
+        'verbose': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            audio_path = os.path.join(output_path, 'audio.mp3')
             video_title = info.get('title', 'Unknown Title')
             thumbnail_url = info.get('thumbnail', '')
-            video_path = os.path.join(output_path, "video.mp4")
             embeded_url = f"https://www.youtube.com/embed/{info['id']}"
-            return video_path, video_title, thumbnail_url, embeded_url
+            return audio_path, video_title, thumbnail_url, embeded_url
     except Exception as e:
-        return None
+        print(f"Error downloading audio: {e}")
+        return None, None, None, None
 
-
-def extract_audio_with_ffmpeg(video_path, audio_path='videos/audio', bitrate='64k'):
-
-    if not os.path.exists(audio_path):
-        os.makedirs(audio_path)
-
-    audio_file = os.path.join(audio_path, 'compressed_audio.mp3')
-    cmd = [
-        'ffmpeg', '-i', video_path, '-vn',
-        '-acodec', 'libmp3lame', '-b:a', bitrate, '-y', audio_file
-    ]
-
-    try:
-        subprocess.run(cmd, check=True)
-
-        if os.path.exists(video_path):
-            os.remove(video_path)
-
-        return audio_file
-    except subprocess.CalledProcessError as e:
-        return None
-
-def upload_audio(api_key, audio_file_path):
-
-    headers = {'authorization': api_key}
-    with open(audio_file_path, 'rb') as audio_file:
-        response = requests.post('https://api.assemblyai.com/v2/upload', headers=headers, data=audio_file)
-
-        if response.status_code == 200:
-            return response.json().get('upload_url')
-        else:
-            return None
-
-
-def request_transcription(api_key, audio_url):
-
-    headers = {'authorization': api_key}
-    response = requests.post('https://api.assemblyai.com/v2/transcript', headers=headers, json={'audio_url': audio_url})
-
-    if response.status_code == 200:
-        return response.json().get('id')
-    else:
-        return None
-
-
-def poll_transcription(api_key, transcript_id, audio_file):
-
-    headers = {'authorization': api_key}
-    while True:
-        response = requests.get(f'https://api.assemblyai.com/v2/transcript/{transcript_id}', headers=headers)
-        result = response.json()
-
-        if result['status'] == 'completed':
-            if os.path.exists(audio_file):
-                os.remove(audio_file)
-
-            return result['text']
-
-        elif result['status'] == 'failed':
-            raise Exception("Transcription failed.")
-
-        time.sleep(1)
+def trancribe_video(audio_path):
+    model = ws("tiny", device='cpu',compute_type="float32", cpu_threads=4)
+    result,_ = model.transcribe(audio_path,beam_size=1,vad_filter=True)
+    full_text = " ".join(word.text for word in result)
+    return full_text
 
 @yvs_bp.route('/get-youtube-video-summary', methods=['POST'])
 def get_summary_of_the_video():
-    print(request.get_json())
     if(not request.is_json):
         return jsonify({'error', "Request must be in json format"}),400
     
     data = request.get_json()
-    prompt = f''' 
-        You are a smart assistant that summarizes videos or articles into short, well-structured HTML summaries.
-        Please read the following content (it may be plain text or HTML), and return a clean HTML summary.
-        ✅ Guidelines:
-        - Start the summary with: **"In this video..."**
-        - Provide a comprehensive summary that captures key points, structure, and insights
-        - Bullets are must such that highlighting each n every aspect
-        - Use proper HTML formatting like `<p>`, `<ul>`, `<li>`, etc.
-        - Do **not** include `<html>`, `<body>`, or script/style tags — only the inner content.
-        - Ensure the output is **safe to inject using `dangerouslySetInnerHTML` in React**.
-        - Do **not** add extra commentary or explanation.
+    prompt = f"""
+        You are a highly intelligent assistant that creates **long-form HTML summaries** of videos or articles.
+
+        📌 Your goal:
+        Summarize the given content into **2–3x its original length**, with a focus on clarity, structure, and depth — as if preparing an article or report.
+
+        ✅ Summary Format Guidelines:
+        - Start with: <p><strong>In this video...</strong></p>
+        - Structure the summary with meaningful sections using <h2> and <h3> for key topics and subtopics.
+        - Use <p> for detailed paragraphs under each section.
+        - Use <ul> and <li> to capture bullet points where appropriate (for lists, highlights, takeaways, etc.)
+        - Use <strong> to **bold** key terms, concepts, or important names.
+        - Reflect the **tone and structure** of the content faithfully.
+        - If the original content is short, **expand** it by elaborating on implications, examples, or context based on what's presented.
+        - The output should be 2–3 times the original content's length.
+        - Avoid repetition, filler, or generic text.
+
+        ❌ Do NOT:
+        - Include <html>, <body>, <script>, or <style> tags.
+        - Add any commentary or meta-explanation.
+        - Use headings or text that are not grounded in the original content.
+
         📄 Content to summarize:
-        """
+        \"\"\"
         {data['content']}
-        """
-    '''
+        \"\"\"
+    """
+
     genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
     model = genai.GenerativeModel("gemini-2.0-flash")
     summarization = model.generate_content(prompt).text
