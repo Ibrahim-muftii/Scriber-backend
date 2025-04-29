@@ -28,7 +28,11 @@ def get_transcription():
         if not youtube_url:
             return jsonify({'error': 'YouTube URL is required'}), 400
 
-        audio_path, video_title, thumbnail_url, embeded_url = download_youtube_video(youtube_url)
+        audio_path, video_title, thumbnail_url, embeded_url, duration = download_youtube_video(youtube_url)
+
+        if duration > 900:
+            return jsonify({'error': 'Can not process video of duration more than 15 minutes'}), 400 
+
         if not audio_path:
             return jsonify({'error': 'Failed to download video'}), 500
         transcription_text = trancribe_video(audio_path)
@@ -47,6 +51,7 @@ def get_transcription():
             'videoTitle':video_title,
             'thumbnail':thumbnail_url,
             'transcription': transcription_text,
+            'duration':duration,
             'embededUrl':embeded_url
         }), 200
 
@@ -77,8 +82,9 @@ def download_youtube_video(url, output_path='videos'):
             audio_path = os.path.join(output_path, 'audio.mp3')
             video_title = info.get('title', 'Unknown Title')
             thumbnail_url = info.get('thumbnail', '')
+            duration = info.get('duration')
             embeded_url = f"https://www.youtube.com/embed/{info['id']}"
-            return audio_path, video_title, thumbnail_url, embeded_url
+            return audio_path, video_title, thumbnail_url, embeded_url, duration
     except Exception as e:
         print(f"Error downloading audio: {e}")
         return None, None, None, None
