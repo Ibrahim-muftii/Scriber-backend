@@ -4,6 +4,7 @@ import re
 from flask import Blueprint, request, jsonify,after_this_request
 from google import generativeai as genai
 from dotenv import load_dotenv
+import time;
 from faster_whisper import WhisperModel as ws
 
 load_dotenv()
@@ -13,7 +14,7 @@ yvs_bp = Blueprint('yvs_bp', __name__)
 
 @yvs_bp.route('/get-transcription', methods=['POST'])
 def get_transcription():
-    """Handles the API request to transcribe a YouTube video."""
+    start_time = time.time() 
     try:
 
         if not request.is_json:
@@ -45,14 +46,16 @@ def get_transcription():
             except Exception as cleanup_error:
                 print(f"Error deleting audio file: {cleanup_error}")
             return response
-
+        
+        total_time = round(time.time() - start_time, 2)
         return jsonify({
             'status': 'success',
             'videoTitle':video_title,
             'thumbnail':thumbnail_url,
             'transcription': transcription_text,
             'duration':duration,
-            'embededUrl':embeded_url
+            'embededUrl':embeded_url,
+            'videoTime':total_time
         }), 200
 
     except Exception as e:
@@ -68,7 +71,9 @@ def download_youtube_video(url, output_path='videos'):
         'outtmpl': os.path.join(output_path, 'audio.%(ext)s'),
         'noplaylist': True,
         'cookiefile': 'cookies.txt',
-        'verbose': True,
+        'verbose': False,
+        'quiet':True,
+        'no_warnings':True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -91,7 +96,7 @@ def download_youtube_video(url, output_path='videos'):
 
 def trancribe_video(audio_path):
     model = ws("tiny", device='cpu',compute_type="float32", cpu_threads=4)
-    result,_ = model.transcribe(audio_path,beam_size=1,vad_filter=True)
+    result,_ = model.transcribe(audio_path,beam_size=1,vad_filter=True,language='en')
     full_text = " ".join(word.text for word in result)
     return full_text
 
