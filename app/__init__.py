@@ -2,6 +2,7 @@ from flask import Flask
 from app.routes.YoutubeVideoSummarizer import yvs_bp
 from app.routes.CodeLanguageChanger import clc_bp
 from app.routes.GestureModule import gm_bp
+from app.routes.SummarizerChatbot import chatbot_bp
 from flask_cors import CORS
 
 
@@ -19,6 +20,7 @@ def create_app():
     app.register_blueprint(yvs_bp, url_prefix='/yvs')
     app.register_blueprint(clc_bp, url_prefix='/clc')
     app.register_blueprint(gm_bp, url_prefix='/gm')
+    app.register_blueprint(chatbot_bp, url_prefix='/sc')
     # Import and register Blueprints AFTER the app is created
     
     # You can register more blueprints here if you want:
