@@ -1,6 +1,8 @@
 import os
+import yt_dlp
+import subprocess
 import argostranslate.translate
-from app.utils.video_downloader import download_video
+
 import re
 from flask import Blueprint, request, jsonify, after_this_request
 from google import generativeai as genai
@@ -67,64 +69,124 @@ def get_transcription():
         return jsonify({'error': str(e)}), 500
 
 
+from playwright.sync_api import sync_playwright
+
+def get_youtube_cookies(url):
+    """
+    Launches a headless browser to visit the YouTube URL and extract cookies.
+    This helps bypass bot detection by providing valid session cookies.
+    """
+    print("Getting cookies via Playwright...")
+    cookies = []
+    try:
+        with sync_playwright() as p:
+            # Launch headless browser
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            )
+            page = context.new_page()
+            
+            # Navigate to the video
+            print(f"Navigating to {url}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            
+            # Wait a bit for cookies to be set
+            time.sleep(2)
+            
+            # Handle Consent Popup (if any)
+            try:
+                # Common selectors for "Accept all" or "Reject all"
+                consent_button = page.query_selector('button[aria-label="Accept all"], button[aria-label="Reject all"], #onetrust-accept-btn-handler')
+                if consent_button:
+                    print("Clicking consent button...")
+                    consent_button.click()
+                    time.sleep(2)
+            except Exception as e:
+                print(f"Consent handling ignored: {e}")
+
+            # Get cookies
+            cookies = context.cookies()
+            print(f"Extracted {len(cookies)} cookies.")
+            browser.close()
+            
+            return cookies
+            
+    except Exception as e:
+        print(f"Failed to get cookies: {e}")
+        return []
 
 def download_youtube_audio(url, output_path='videos'):
-    """
-    Downloads YouTube video using Playwright and SaveFrom.net.
-    Returns: (audio_path, video_title, thumbnail_url, embedded_url, duration)
-    """
-    print("Downloading via Playwright...")
+    print("Downloading...")
     try:
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
-        file_path, title, thumbnail, embed, duration = download_video(url, output_path)
+        # 1. Get dynamic cookies
+        cookies = get_youtube_cookies(url)
         
-        if file_path and os.path.exists(file_path):
-            return file_path, title, thumbnail, embed, duration
-        else:
-            print("[FAILURE] Download failed or file not found.")
-            return None, None, None, None, None
+        # Create a temporary cookies file
+        temp_cookie_file = os.path.join(output_path, f"temp_cookies_{int(time.time())}.txt")
+        if cookies:
+            with open(temp_cookie_file, 'w') as f:
+                f.write("# Netscape HTTP Cookie File\n")
+                for cookie in cookies:
+                    # Convert Playwright cookie to Netscape format
+                    domain = cookie['domain']
+                    flag = "TRUE" if domain.startswith('.') else "FALSE"
+                    path = cookie['path']
+                    secure = "TRUE" if cookie['secure'] else "FALSE"
+                    expiration = str(int(cookie['expires'])) if 'expires' in cookie else "0"
+                    name = cookie['name']
+                    value = cookie['value']
+                    f.write(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}\n")
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(output_path, 'audio.%(ext)s'),
+            'noplaylist': True,
+            'verbose': False,
+            'quiet': True,
+            'no_warnings': True,
+            # Use Android client as primary stealth
+            'extractor_args': {'youtube': {'player_client': ['android']}},
+            'nocheckcertificate': True,
+            'ignoreerrors': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }]
+        }
+
+        # Use the temp cookie file if we got cookies
+        if cookies and os.path.exists(temp_cookie_file):
+            print(f"Using dynamic cookies from {temp_cookie_file}")
+            ydl_opts['cookiefile'] = temp_cookie_file
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                audio_path = os.path.join(output_path, 'audio.mp3')
+                video_title = info.get('title', 'Unknown Title')
+                thumbnail_url = info.get('thumbnail', '')
+                duration = info.get('duration', 0)
+                embedded_url = f"https://www.youtube.com/embed/{info['id']}"
+                
+                return audio_path, video_title, thumbnail_url, embedded_url, duration
+        finally:
+            # Clean up temp cookie file
+            if os.path.exists(temp_cookie_file):
+                try:
+                    os.remove(temp_cookie_file)
+                    print(f"Deleted temp cookie file: {temp_cookie_file}")
+                except Exception as e:
+                    print(f"Error deleting temp cookie file: {e}")
 
     except Exception as e:
         print("An error occurred while downloading or processing the video:")
         traceback.print_exc()
         return None, None, None, None, None
-
-
-# def transcribe_video(audio_path):
-#     """Transcribe audio using CPU-only faster-whisper"""
-#     print("Starting CPU-based transcription...")
-    
-#     try:
-#         # Force CPU usage with int8 for better performance
-#         model = ws(
-#             "small",
-#             device="cpu",
-#             compute_type="int8",
-#             cpu_threads=os.cpu_count() or 4
-#         )
-        
-#         result, _ = model.transcribe(
-#             audio_path, 
-#             beam_size=1,
-#             vad_filter=False,
-#             language="en"
-#         )
-        
-#         full_text = " ".join(segment.text for segment in result)
-#         print("[SUCCESS] Transcription completed")
-#         return full_text
-        
-#     except Exception as e:
-#         print(f"[ERROR] Transcription failed: {str(e)}")
-#         raise Exception(f"Failed to transcribe audio: {str(e)}")
-
-# def transcribe_video(audio_path):
-#     model = ws("tiny", device='cpu',compute_type="float32", cpu_threads=4)
-#     result,_ = model.transcribe(audio_path,beam_size=1,vad_filter=True,language='en')
-#     full_text = " ".join(word.text for word in result)
-#     return full_text
 
 def transcribe_video(audio_path, final_output_path="videos/audio.wav.txt"):
     print("transcribing the video")
