@@ -19,7 +19,8 @@ def summarizer_chatbot():
     if(not data):
         return jsonify({'error': 'No JSON data received'}), 400
 
-    model = genai.GenerativeModel('gemini-2.5-flash-lite-preview-06-17')  # Use 'gemini-1.5-flash' or latest available
+    # model = genai.GenerativeModel('gemini-2.0-flash')  # Use 'gemini-1.5-flash' or latest available
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')  # Use 'gemini-1.5-flash' or latest available
     history = data.get("history")
     prompt = f"""
         You are a video-focused assistant that answers user questions **only in HTML format**, based on the video’s subject, content, and naturally related concepts.
