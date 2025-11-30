@@ -1,30 +1,43 @@
 import os
 import yt_dlp
-import subprocess
-import argostranslate.translate
 import re
-from flask import Blueprint, request, jsonify, after_this_request
+import time
+from flask import Blueprint, request, jsonify
 from google import generativeai as genai
 from dotenv import load_dotenv
-import time
-from argostranslate.translate import get_installed_languages
-import argostranslate
-from faster_whisper import WhisperModel as ws
-import traceback
+import argostranslate.translate
+import argostranslate.package
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 load_dotenv()
 yvs_bp = Blueprint('yvs_bp', __name__)
 
+def extract_video_id(url):
+    """
+    Extracts the video ID from various YouTube URL formats.
+    """
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
+        r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})',
+        r'(?:embed\/)([0-9A-Za-z_-]{11})',
+        r'(?:shorts\/)([0-9A-Za-z_-]{11})'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+            
+    return None
+
 @yvs_bp.route('/get-transcription', methods=['POST'])
 def get_transcription():
-    print("STARTED..... ")
     start_time = time.time() 
     try:
         if not request.is_json:
             return jsonify({'error': 'Request must be in JSON format'}), 400
 
         data = request.get_json()
-
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
 
@@ -32,25 +45,39 @@ def get_transcription():
         if not youtube_url:
             return jsonify({'error': 'YouTube URL is required'}), 400
 
-        audio_path, video_title, thumbnail_url, embeded_url, duration = download_youtube_audio(youtube_url)
+        video_id = extract_video_id(youtube_url)
+        if not video_id:
+             return jsonify({'error': 'Invalid YouTube URL'}), 400
 
-        if duration > 900:
-            return jsonify({'error': 'Can not process video of duration more than 15 minutes'}), 400 
+        transcription_text = ""
+        video_title = "Unknown Title"
+        thumbnail_url = ""
+        duration = 0
+        embeded_url = f"https://www.youtube.com/embed/{video_id}"
 
-        if not audio_path:
-            return jsonify({'error': 'Failed to download video'}), 500
+        # --- LAYER 1: API (Captions) ---
+        try:
+            # Instantiate API (Required for this version)
+            api = YouTubeTranscriptApi()
+            transcript_list = api.fetch(video_id)
             
-        transcription_text = transcribe_video(audio_path)
-
-        @after_this_request
-        def cleanUp(response):
+            # Combine text parts (Iterate and access .text attribute)
+            transcription_text = " ".join([t.text for t in transcript_list])
+            
+            # Fetch metadata without downloading
             try:
-                if os.path.exists(audio_path):
-                    os.remove(audio_path)
-            except Exception as cleanup_error:
-                print(f"Error deleting audio file: {cleanup_error}")
-            return response
-        
+                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                    info = ydl.extract_info(youtube_url, download=False)
+                    video_title = info.get('title', 'Unknown Title')
+                    thumbnail_url = info.get('thumbnail', '')
+                    duration = info.get('duration', 0)
+            except Exception as e:
+                print(f"Error fetching metadata: {e}")
+
+        except (TranscriptsDisabled, NoTranscriptFound, Exception) as e:
+            print(f"API Captions failed: {e}")
+            return jsonify({'error': f'Failed to fetch captions: {str(e)}'}), 500
+
         total_time = round(time.time() - start_time, 2)
         return jsonify({
             'status': 'success',
@@ -65,79 +92,6 @@ def get_transcription():
     except Exception as e:
         print("TRANSCRIPTION ERROR : ", e)
         return jsonify({'error': str(e)}), 500
-
-def download_youtube_audio(url, output_path='videos'):
-    print("Downloading...")
-    try:
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
-
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_path, 'audio.%(ext)s'),
-            'noplaylist': True,
-            'verbose': False,
-            'quiet': True,
-            'no_warnings': True,
-            # Use Firefox cookies from the browser
-            'cookiesfrombrowser': ('firefox',),
-            # Use Android client as primary stealth
-            'extractor_args': {'youtube': {'player_client': ['android']}},
-            'nocheckcertificate': True,
-            'ignoreerrors': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
-        }
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                audio_path = os.path.join(output_path, 'audio.mp3')
-                video_title = info.get('title', 'Unknown Title')
-                thumbnail_url = info.get('thumbnail', '')
-                duration = info.get('duration', 0)
-                embedded_url = f"https://www.youtube.com/embed/{info['id']}"
-                
-                return audio_path, video_title, thumbnail_url, embedded_url, duration
-        except Exception as e:
-            print(f"Error in yt_dlp download: {e}")
-            return None, None, None, None, None
-
-    except Exception as e:
-        print("An error occurred while downloading or processing the video:")
-        traceback.print_exc()
-        return None, None, None, None, None
-
-def transcribe_video(audio_path, final_output_path="videos/audio.wav.txt"):
-    print("transcribing the video")
-    model_path = "whisper.cpp/models/ggml-base.en.bin"
-    whisper_cli = "whisper.cpp/build/bin/whisper-cli"
-
-    command = [
-        whisper_cli,
-        "-m", model_path,
-        "-f", audio_path,
-        "--threads", "4",
-        "--language", "en",
-        "--output-txt"
-    ]
-
-    try:     
-        subprocess.run(command, check=True)
-        
-        with open(final_output_path, "r", encoding="utf-8") as f:
-            result = f.read().strip()
-        os.remove(final_output_path)
-
-        return result
-
-    except Exception as e:
-        print(f"Transcription failed: {e}")
-        return ""
-
 
 @yvs_bp.route('/get-youtube-video-summary', methods=['POST'])
 def get_summary_of_the_video():
