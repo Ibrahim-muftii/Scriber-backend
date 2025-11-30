@@ -5,13 +5,14 @@ google-generativeai==0.8.4
 argostranslate==1.10.0
 faster-whisper==1.1.1
 playwright==1.56.0
-playwright-stealth==2.0.0
+playwright-stealth==1.0.6
 requests==2.32.3
 rembg==2.0.64
 opencv-python-headless==4.11.0.86
 numpy==2.1.3
 moviepy==2.1.2
 yt-dlp==2025.1.26
+youtube-transcript-api==0.6.3
 # Dependencies for the above packages (pinned for stability based on previous file)
 aiohttp==3.11.16
 colorama==0.4.6

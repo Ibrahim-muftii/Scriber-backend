@@ -2,7 +2,6 @@ import os
 import yt_dlp
 import subprocess
 import argostranslate.translate
-
 import re
 from flask import Blueprint, request, jsonify, after_this_request
 from google import generativeai as genai
@@ -12,12 +11,9 @@ from argostranslate.translate import get_installed_languages
 import argostranslate
 from faster_whisper import WhisperModel as ws
 import traceback
-from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
 
 load_dotenv()
 yvs_bp = Blueprint('yvs_bp', __name__)
-
 
 @yvs_bp.route('/get-transcription', methods=['POST'])
 def get_transcription():
@@ -70,82 +66,12 @@ def get_transcription():
         print("TRANSCRIPTION ERROR : ", e)
         return jsonify({'error': str(e)}), 500
 
-
-def get_youtube_cookies(url):
-    """
-    Launches a headless browser to visit the YouTube URL and extract cookies.
-    This helps bypass bot detection by providing valid session cookies.
-    """
-    print("Getting cookies via Playwright...")
-    cookies = []
-    user_agent = ""
-    try:
-        with sync_playwright() as p:
-            # Launch headless browser
-            browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            
-            # Apply stealth
-            stealth_sync(page)
-            
-            # Navigate to the video
-            print(f"Navigating to {url}...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            
-            # Wait a bit for cookies to be set
-            time.sleep(5)
-            
-            # Handle Consent Popup (if any)
-            try:
-                # Common selectors for "Accept all" or "Reject all"
-                consent_button = page.query_selector('button[aria-label="Accept all"], button[aria-label="Reject all"], #onetrust-accept-btn-handler')
-                if consent_button:
-                    print("Clicking consent button...")
-                    consent_button.click()
-                    time.sleep(2)
-            except Exception as e:
-                print(f"Consent handling ignored: {e}")
-
-            # Get cookies and UA
-            cookies = context.cookies()
-            user_agent = page.evaluate("navigator.userAgent")
-            print(f"Extracted {len(cookies)} cookies. UA: {user_agent}")
-            browser.close()
-            
-            return cookies, user_agent
-            
-    except Exception as e:
-        print(f"Failed to get cookies: {e}")
-        return [], ""
-
 def download_youtube_audio(url, output_path='videos'):
     print("Downloading...")
     try:
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
-        # 1. Get dynamic cookies and UA
-        cookies, user_agent = get_youtube_cookies(url)
-        
-        # Create a temporary cookies file
-        temp_cookie_file = os.path.join(output_path, f"temp_cookies_{int(time.time())}.txt")
-        if cookies:
-            with open(temp_cookie_file, 'w') as f:
-                f.write("# Netscape HTTP Cookie File\n")
-                for cookie in cookies:
-                    # Convert Playwright cookie to Netscape format
-                    domain = cookie['domain']
-                    flag = "TRUE" if domain.startswith('.') else "FALSE"
-                    path = cookie['path']
-                    secure = "TRUE" if cookie['secure'] else "FALSE"
-                    expiration = str(int(cookie['expires'])) if 'expires' in cookie else "0"
-                    name = cookie['name']
-                    value = cookie['value']
-                    f.write(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}\n")
-        
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': os.path.join(output_path, 'audio.%(ext)s'),
@@ -153,6 +79,8 @@ def download_youtube_audio(url, output_path='videos'):
             'verbose': False,
             'quiet': True,
             'no_warnings': True,
+            # Use Firefox cookies from the browser
+            'cookiesfrombrowser': ('firefox',),
             # Use Android client as primary stealth
             'extractor_args': {'youtube': {'player_client': ['android']}},
             'nocheckcertificate': True,
@@ -164,16 +92,6 @@ def download_youtube_audio(url, output_path='videos'):
             }]
         }
 
-        # Use the temp cookie file if we got cookies
-        if cookies and os.path.exists(temp_cookie_file):
-            print(f"Using dynamic cookies from {temp_cookie_file}")
-            ydl_opts['cookiefile'] = temp_cookie_file
-        
-        # Sync User Agent if available
-        if user_agent:
-            print(f"Syncing User Agent: {user_agent}")
-            ydl_opts['user_agent'] = user_agent
-
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -184,14 +102,9 @@ def download_youtube_audio(url, output_path='videos'):
                 embedded_url = f"https://www.youtube.com/embed/{info['id']}"
                 
                 return audio_path, video_title, thumbnail_url, embedded_url, duration
-        finally:
-            # Clean up temp cookie file
-            if os.path.exists(temp_cookie_file):
-                try:
-                    os.remove(temp_cookie_file)
-                    print(f"Deleted temp cookie file: {temp_cookie_file}")
-                except Exception as e:
-                    print(f"Error deleting temp cookie file: {e}")
+        except Exception as e:
+            print(f"Error in yt_dlp download: {e}")
+            return None, None, None, None, None
 
     except Exception as e:
         print("An error occurred while downloading or processing the video:")
