@@ -1,5 +1,4 @@
 import os
-import yt_dlp
 import re
 import time
 from flask import Blueprint, request, jsonify
@@ -8,6 +7,7 @@ from dotenv import load_dotenv
 import argostranslate.translate
 import argostranslate.package
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+import requests
 
 load_dotenv()
 yvs_bp = Blueprint('yvs_bp', __name__)
@@ -51,7 +51,7 @@ def get_transcription():
 
         transcription_text = ""
         video_title = "Unknown Title"
-        thumbnail_url = ""
+        thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
         duration = 0
         embeded_url = f"https://www.youtube.com/embed/{video_id}"
 
@@ -105,13 +105,13 @@ def get_transcription():
             
             transcription_text = " ".join(text_parts)
             
-            # Fetch metadata without downloading
+            # Fetch metadata using requests + regex (No yt-dlp)
             try:
-                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                    info = ydl.extract_info(youtube_url, download=False)
-                    video_title = info.get('title', 'Unknown Title')
-                    thumbnail_url = info.get('thumbnail', '')
-                    duration = info.get('duration', 0)
+                response = requests.get(youtube_url)
+                if response.status_code == 200:
+                    title_match = re.search(r'<meta property="og:title" content="(.*?)">', response.text)
+                    if title_match:
+                        video_title = title_match.group(1)
             except Exception as e:
                 print(f"Error fetching metadata: {e}")
 
