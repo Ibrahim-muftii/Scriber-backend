@@ -57,12 +57,53 @@ def get_transcription():
 
         # --- LAYER 1: API (Captions) ---
         try:
-            # Instantiate API (Required for this version)
-            api = YouTubeTranscriptApi()
-            transcript_list = api.fetch(video_id)
+            transcript_data = None
             
-            # Combine text parts (Iterate and access .text attribute)
-            transcription_text = " ".join([t.text for t in transcript_list])
+            # Strategy 1: list_transcripts (Modern - v0.4.0+)
+            if hasattr(YouTubeTranscriptApi, 'list_transcripts'):
+                try:
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                    try:
+                        transcript = transcript_list.find_manually_created_transcript(['en'])
+                    except:
+                        try:
+                            transcript = transcript_list.find_generated_transcript(['en'])
+                        except:
+                            transcript = next(iter(transcript_list))
+                    transcript_data = transcript.fetch()
+                except Exception as e:
+                    print(f"Strategy 1 failed: {e}")
+
+            # Strategy 2: get_transcript (Standard Static - v0.2.0+)
+            if not transcript_data and hasattr(YouTubeTranscriptApi, 'get_transcript'):
+                try:
+                    transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
+                except Exception as e:
+                    print(f"Strategy 2 failed: {e}")
+
+            # Strategy 3: Instance fetch (Legacy/Alternative)
+            if not transcript_data:
+                try:
+                    api = YouTubeTranscriptApi()
+                    if hasattr(api, 'fetch'):
+                        transcript_data = api.fetch(video_id)
+                except Exception as e:
+                    print(f"Strategy 3 failed: {e}")
+
+            if not transcript_data:
+                raise Exception("No compatible transcription method found or all failed.")
+
+            # Process Result (Handle dicts vs objects)
+            text_parts = []
+            for t in transcript_data:
+                if isinstance(t, dict) and 'text' in t:
+                    text_parts.append(t['text'])
+                elif hasattr(t, 'text'):
+                    text_parts.append(t.text)
+                else:
+                    text_parts.append(str(t))
+            
+            transcription_text = " ".join(text_parts)
             
             # Fetch metadata without downloading
             try:
