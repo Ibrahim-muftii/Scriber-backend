@@ -66,6 +66,43 @@ def fetch_with_proxy_fallback(url, timeout=10):
     # All proxies failed
     raise Exception("All proxies failed to fetch the URL")
 
+def get_transcript_with_proxies(video_id):
+    """
+    Try to fetch transcript with proxy fallback.
+    First tries without proxy, then tries each proxy in the list.
+    """
+    # Try without proxy first
+    try:
+        print(f"Attempting to fetch transcript without proxy...")
+        # Note: In v1.2.3, we can pass http_client to constructor
+        api = YouTubeTranscriptApi() 
+        if hasattr(api, 'fetch'):
+             return api.fetch(video_id)
+    except Exception as e:
+        print(f"✗ Direct transcript fetch failed: {e}")
+
+    # Try with each proxy
+    for idx, proxy in enumerate(PROXY_LIST, 1):
+        try:
+            proxy_dict = get_proxy_dict(proxy)
+            print(f"Attempting transcript proxy {idx}/{len(PROXY_LIST)}: {proxy['ip']}:{proxy['port']}")
+            
+            session = requests.Session()
+            session.proxies.update(proxy_dict)
+            
+            # Pass the session with proxies to the API
+            api = YouTubeTranscriptApi(http_client=session)
+            if hasattr(api, 'fetch'):
+                transcript = api.fetch(video_id)
+                print(f"✓ Transcript success with proxy {proxy['ip']}:{proxy['port']}")
+                return transcript
+                
+        except Exception as e:
+            print(f"✗ Transcript proxy {proxy['ip']}:{proxy['port']} failed: {e}")
+            continue
+
+    raise Exception("All proxies failed to fetch the transcript")
+
 def extract_video_id(url):
     """
     Extracts the video ID from various YouTube URL formats.
@@ -111,38 +148,7 @@ def get_transcription():
 
         # --- LAYER 1: API (Captions) ---
         try:
-            transcript_data = None
-            
-            # Strategy 1: list_transcripts (Modern - v0.4.0+)
-            if hasattr(YouTubeTranscriptApi, 'list_transcripts'):
-                try:
-                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                    try:
-                        transcript = transcript_list.find_manually_created_transcript(['en'])
-                    except:
-                        try:
-                            transcript = transcript_list.find_generated_transcript(['en'])
-                        except:
-                            transcript = next(iter(transcript_list))
-                    transcript_data = transcript.fetch()
-                except Exception as e:
-                    print(f"Strategy 1 failed: {e}")
-
-            # Strategy 2: get_transcript (Standard Static - v0.2.0+)
-            if not transcript_data and hasattr(YouTubeTranscriptApi, 'get_transcript'):
-                try:
-                    transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
-                except Exception as e:
-                    print(f"Strategy 2 failed: {e}")
-
-            # Strategy 3: Instance fetch (Legacy/Alternative)
-            if not transcript_data:
-                try:
-                    api = YouTubeTranscriptApi()
-                    if hasattr(api, 'fetch'):
-                        transcript_data = api.fetch(video_id)
-                except Exception as e:
-                    print(f"Strategy 3 failed: {e}")
+            transcript_data = get_transcript_with_proxies(video_id)
 
             if not transcript_data:
                 raise Exception("No compatible transcription method found or all failed.")
