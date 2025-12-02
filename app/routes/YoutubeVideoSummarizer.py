@@ -12,96 +12,84 @@ import requests
 load_dotenv()
 yvs_bp = Blueprint('yvs_bp', __name__)
 
-# List of proxies (first 10 from your list)
-PROXY_LIST = [
-    {"ip": "144.125.164.158", "port": "8080"},
-    {"ip": "139.99.237.62", "port": "80"},
-    {"ip": "72.10.160.90", "port": "1237"},
-    {"ip": "20.242.243.105", "port": "3128"},
-    {"ip": "213.142.156.97", "port": "80"},
-    {"ip": "38.54.71.67", "port": "80"},
-    {"ip": "219.93.101.63", "port": "80"},
-    {"ip": "139.59.1.14", "port": "80"},
-    {"ip": "34.216.224.9", "port": "40715"},
-    {"ip": "219.93.101.62", "port": "80"}
-]
+# Debug: Check library version
+try:
+    import youtube_transcript_api
+    print(f"DEBUG: youtube_transcript_api version: {getattr(youtube_transcript_api, '__version__', 'unknown')}")
+    print(f"DEBUG: youtube_transcript_api file: {youtube_transcript_api.__file__}")
+except Exception as e:
+    print(f"DEBUG: Could not inspect youtube_transcript_api: {e}")
+
+# Residential Proxy Configuration
+PROXY_CONFIG = {
+    "host": "geo.iproyal.com",
+    "port": "12321",
+    "user": "qh8zCbvC4Hn1cfM6",
+    "pass": "gkfqGoHGmfB9PTjL"
+}
 
 def get_proxy_dict(proxy):
-    """Convert proxy dict to requests proxy format"""
-    proxy_url = f"http://{proxy['ip']}:{proxy['port']}"
+    """Convert proxy dict to requests proxy format with authentication"""
+    if 'user' in proxy and 'pass' in proxy:
+        proxy_url = f"http://{proxy['user']}:{proxy['pass']}@{proxy['host']}:{proxy['port']}"
+    else:
+        proxy_url = f"http://{proxy['ip']}:{proxy['port']}"
+        
     return {
         "http": proxy_url,
         "https": proxy_url
     }
 
-def fetch_with_proxy_fallback(url, timeout=10):
+def fetch_with_proxy(url, timeout=10):
     """
-    Try to fetch URL with proxy fallback.
-    First tries without proxy, then tries each proxy in the list.
+    Fetch URL using the configured proxy.
+    No fallback, no loop.
     """
-    # Try without proxy first
     try:
-        print(f"Attempting to fetch without proxy...")
-        response = requests.get(url, timeout=timeout)
+        proxy_dict = get_proxy_dict(PROXY_CONFIG)
+        print(f"Attempting fetch with proxy: {PROXY_CONFIG.get('host', PROXY_CONFIG.get('ip'))}:{PROXY_CONFIG['port']}")
+        
+        response = requests.get(url, proxies=proxy_dict, timeout=timeout)
         if response.status_code == 200:
-            print(f"✓ Success without proxy")
+            print(f"✓ Success with proxy")
             return response
-    except Exception as e:
-        print(f"✗ Direct connection failed: {e}")
-    
-    # Try with each proxy
-    for idx, proxy in enumerate(PROXY_LIST, 1):
-        try:
-            proxy_dict = get_proxy_dict(proxy)
-            print(f"Attempting proxy {idx}/{len(PROXY_LIST)}: {proxy['ip']}:{proxy['port']}")
+        else:
+            raise Exception(f"Request failed with status {response.status_code}")
             
-            response = requests.get(url, proxies=proxy_dict, timeout=timeout)
-            if response.status_code == 200:
-                print(f"✓ Success with proxy {proxy['ip']}:{proxy['port']}")
-                return response
-        except Exception as e:
-            print(f"✗ Proxy {proxy['ip']}:{proxy['port']} failed: {e}")
-            continue
-    
-    # All proxies failed
-    raise Exception("All proxies failed to fetch the URL")
+    except Exception as e:
+        print(f"✗ Proxy fetch failed: {e}")
+        raise e
 
-def get_transcript_with_proxies(video_id):
+def get_transcript_with_proxy(video_id):
     """
-    Try to fetch transcript with proxy fallback.
-    First tries without proxy, then tries each proxy in the list.
+    Fetch transcript using the configured proxy.
+    Uses youtube-transcript-api v1.2.3+ style (http_client).
+    No fallback, no loop.
     """
-    # Try without proxy first
     try:
-        print(f"Attempting to fetch transcript without proxy...")
-        # Note: In v1.2.3, we can pass http_client to constructor
-        api = YouTubeTranscriptApi() 
+        proxy_dict = get_proxy_dict(PROXY_CONFIG)
+        print(f"Attempting transcript fetch with proxy: {PROXY_CONFIG.get('host', PROXY_CONFIG.get('ip'))}:{PROXY_CONFIG['port']}")
+        
+        session = requests.Session()
+        session.proxies.update(proxy_dict)
+        
+        # Instantiate API with the session (v1.2.3+ style)
+        api = YouTubeTranscriptApi(http_client=session)
+        
+        # Use fetch method as verified
         if hasattr(api, 'fetch'):
-             return api.fetch(video_id)
+            transcript = api.fetch(video_id)
+            print(f"✓ Transcript success with proxy")
+            return transcript
+        else:
+            # Fallback for safety, though debug confirmed 'fetch' exists
+            if hasattr(api, 'get_transcript'):
+                 return api.get_transcript(video_id)
+            raise Exception("API instance has no 'fetch' or 'get_transcript' method")
+            
     except Exception as e:
-        print(f"✗ Direct transcript fetch failed: {e}")
-
-    # Try with each proxy
-    for idx, proxy in enumerate(PROXY_LIST, 1):
-        try:
-            proxy_dict = get_proxy_dict(proxy)
-            print(f"Attempting transcript proxy {idx}/{len(PROXY_LIST)}: {proxy['ip']}:{proxy['port']}")
-            
-            session = requests.Session()
-            session.proxies.update(proxy_dict)
-            
-            # Pass the session with proxies to the API
-            api = YouTubeTranscriptApi(http_client=session)
-            if hasattr(api, 'fetch'):
-                transcript = api.fetch(video_id)
-                print(f"✓ Transcript success with proxy {proxy['ip']}:{proxy['port']}")
-                return transcript
-                
-        except Exception as e:
-            print(f"✗ Transcript proxy {proxy['ip']}:{proxy['port']} failed: {e}")
-            continue
-
-    raise Exception("All proxies failed to fetch the transcript")
+        print(f"✗ Transcript proxy fetch failed: {e}")
+        raise e
 
 def extract_video_id(url):
     """
@@ -148,10 +136,11 @@ def get_transcription():
 
         # --- LAYER 1: API (Captions) ---
         try:
-            transcript_data = get_transcript_with_proxies(video_id)
+            # Use the single proxy strategy
+            transcript_data = get_transcript_with_proxy(video_id)
 
             if not transcript_data:
-                raise Exception("No compatible transcription method found or all failed.")
+                raise Exception("No transcript data returned.")
 
             # Process Result (Handle dicts vs objects)
             text_parts = []
@@ -165,14 +154,14 @@ def get_transcription():
             
             transcription_text = " ".join(text_parts)
             
-            # Fetch metadata using requests + regex with proxy fallback
+            # Fetch metadata using requests + regex with proxy
             try:
-                response = fetch_with_proxy_fallback(youtube_url, timeout=10)
+                response = fetch_with_proxy(youtube_url, timeout=10)
                 title_match = re.search(r'<meta property="og:title" content="(.*?)">', response.text)
                 if title_match:
                     video_title = title_match.group(1)
             except Exception as e:
-                print(f"Error fetching metadata with all proxies: {e}")
+                print(f"Error fetching metadata: {e}")
 
         except (TranscriptsDisabled, NoTranscriptFound, Exception) as e:
             print(f"API Captions failed: {e}")
