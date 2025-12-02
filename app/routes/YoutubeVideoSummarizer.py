@@ -12,6 +12,60 @@ import requests
 load_dotenv()
 yvs_bp = Blueprint('yvs_bp', __name__)
 
+# List of proxies (first 10 from your list)
+PROXY_LIST = [
+    {"ip": "144.125.164.158", "port": "8080"},
+    {"ip": "139.99.237.62", "port": "80"},
+    {"ip": "72.10.160.90", "port": "1237"},
+    {"ip": "20.242.243.105", "port": "3128"},
+    {"ip": "213.142.156.97", "port": "80"},
+    {"ip": "38.54.71.67", "port": "80"},
+    {"ip": "219.93.101.63", "port": "80"},
+    {"ip": "139.59.1.14", "port": "80"},
+    {"ip": "34.216.224.9", "port": "40715"},
+    {"ip": "219.93.101.62", "port": "80"}
+]
+
+def get_proxy_dict(proxy):
+    """Convert proxy dict to requests proxy format"""
+    proxy_url = f"http://{proxy['ip']}:{proxy['port']}"
+    return {
+        "http": proxy_url,
+        "https": proxy_url
+    }
+
+def fetch_with_proxy_fallback(url, timeout=10):
+    """
+    Try to fetch URL with proxy fallback.
+    First tries without proxy, then tries each proxy in the list.
+    """
+    # Try without proxy first
+    try:
+        print(f"Attempting to fetch without proxy...")
+        response = requests.get(url, timeout=timeout)
+        if response.status_code == 200:
+            print(f"✓ Success without proxy")
+            return response
+    except Exception as e:
+        print(f"✗ Direct connection failed: {e}")
+    
+    # Try with each proxy
+    for idx, proxy in enumerate(PROXY_LIST, 1):
+        try:
+            proxy_dict = get_proxy_dict(proxy)
+            print(f"Attempting proxy {idx}/{len(PROXY_LIST)}: {proxy['ip']}:{proxy['port']}")
+            
+            response = requests.get(url, proxies=proxy_dict, timeout=timeout)
+            if response.status_code == 200:
+                print(f"✓ Success with proxy {proxy['ip']}:{proxy['port']}")
+                return response
+        except Exception as e:
+            print(f"✗ Proxy {proxy['ip']}:{proxy['port']} failed: {e}")
+            continue
+    
+    # All proxies failed
+    raise Exception("All proxies failed to fetch the URL")
+
 def extract_video_id(url):
     """
     Extracts the video ID from various YouTube URL formats.
@@ -105,15 +159,14 @@ def get_transcription():
             
             transcription_text = " ".join(text_parts)
             
-            # Fetch metadata using requests + regex (No yt-dlp)
+            # Fetch metadata using requests + regex with proxy fallback
             try:
-                response = requests.get(youtube_url)
-                if response.status_code == 200:
-                    title_match = re.search(r'<meta property="og:title" content="(.*?)">', response.text)
-                    if title_match:
-                        video_title = title_match.group(1)
+                response = fetch_with_proxy_fallback(youtube_url, timeout=10)
+                title_match = re.search(r'<meta property="og:title" content="(.*?)">', response.text)
+                if title_match:
+                    video_title = title_match.group(1)
             except Exception as e:
-                print(f"Error fetching metadata: {e}")
+                print(f"Error fetching metadata with all proxies: {e}")
 
         except (TranscriptsDisabled, NoTranscriptFound, Exception) as e:
             print(f"API Captions failed: {e}")
