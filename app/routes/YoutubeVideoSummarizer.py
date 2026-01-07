@@ -22,10 +22,10 @@ except Exception as e:
 
 # Residential Proxy Configuration
 PROXY_CONFIG = {
-    "host": "geo.iproyal.com",
-    "port": "12321",
-    "user": "qh8zCbvC4Hn1cfM6",
-    "pass": "gkfqGoHGmfB9PTjL"
+    "host": "p.webshare.io",
+    "port": "80",
+    "user": "cxjfcrft-1",
+    "pass": "y4mi69ni1mxg"
 }
 
 def get_proxy_dict(proxy):
