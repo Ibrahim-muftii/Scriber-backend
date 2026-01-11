@@ -59,6 +59,7 @@ def process_single_video(video_file, video_id):
         # Summarize using Gemini
         print(f"Generating summary for {original_filename}")
         # summary = generate_summary(transcription)
+        summary = ""  # Summary generation disabled
         
         processing_time = round(time.time() - start_time, 2)
         
@@ -140,6 +141,18 @@ def generate_summary(content):
         return f"<p>Summary generation failed: {str(e)}</p>"
 
 
+@vt_bp.route('/test', methods=['GET', 'POST'])
+def test_endpoint():
+    """
+    Simple test endpoint to verify server is accessible.
+    """
+    return jsonify({
+        'status': 'success',
+        'message': 'Video transcription endpoint is working',
+        'timestamp': time.time()
+    }), 200
+
+
 @vt_bp.route('/upload-videos', methods=['POST'])
 def upload_videos():
     """
@@ -154,12 +167,23 @@ def upload_videos():
         timestamp = request.headers.get('X-Timestamp')
         signature = request.headers.get('X-Signature')
         
+        print(f"Received upload request - Timestamp: {timestamp}, Signature: {signature}")
+        
         if not timestamp or not signature:
+            print("Missing authentication headers")
             return jsonify({'error': 'Missing authentication headers'}), 401
+        
+        # Handle timestamp in milliseconds (convert to seconds)
+        if len(timestamp) > 10:  # Milliseconds format
+            timestamp = str(int(timestamp) // 1000)
+            print(f"Converted millisecond timestamp to seconds: {timestamp}")
         
         # For file uploads, we verify with empty payload
         if not verify("", timestamp, signature):
+            print(f"HMAC verification failed for timestamp: {timestamp}")
             return jsonify({'error': 'Invalid signature'}), 401
+        
+        print("HMAC verification successful")
         
         # Get uploaded files
         files = request.files.getlist('videos')
