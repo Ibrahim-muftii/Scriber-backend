@@ -1,8 +1,8 @@
 import os
 import cv2
 import base64
+import subprocess
 from werkzeug.utils import secure_filename
-from moviepy.editor import VideoFileClip
 
 ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'flv'}
 MAX_FILE_SIZE_MB = 50
@@ -68,7 +68,7 @@ def save_temp_file(file, upload_folder):
 
 def extract_audio_from_video(video_path, audio_output_path=None):
     """
-    Extract audio from video file using moviepy.
+    Extract audio from video file using FFmpeg directly.
     
     Args:
         video_path: Path to video file
@@ -82,10 +82,23 @@ def extract_audio_from_video(video_path, audio_output_path=None):
         audio_output_path = f"{base_name}.wav"
     
     try:
-        video = VideoFileClip(video_path)
-        video.audio.write_audiofile(audio_output_path, logger=None)
-        video.close()
+        # Use FFmpeg to extract audio
+        command = [
+            'ffmpeg',
+            '-i', video_path,
+            '-vn',  # No video
+            '-acodec', 'pcm_s16le',  # PCM 16-bit
+            '-ar', '16000',  # 16kHz sample rate (good for Whisper)
+            '-ac', '1',  # Mono
+            '-y',  # Overwrite output file
+            audio_output_path
+        ]
+        
+        subprocess.run(command, check=True, capture_output=True)
         return audio_output_path
+    except subprocess.CalledProcessError as e:
+        print(f"Audio extraction failed: {e.stderr.decode() if e.stderr else str(e)}")
+        raise Exception(f"FFmpeg audio extraction failed: {str(e)}")
     except Exception as e:
         print(f"Audio extraction failed: {e}")
         raise e
