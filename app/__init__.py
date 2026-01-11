@@ -19,6 +19,13 @@ def create_app():
     # app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mydatabase.db'
     # db.init_app(app)
 
+    # Allow large videos
+    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024 * 1024   # 50GB
+    app.config['UPLOAD_FOLDER'] = '/tmp'
+    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+
+
+
     app.register_blueprint(yvs_bp, url_prefix='/yvs')
     app.register_blueprint(clc_bp, url_prefix='/clc')
     app.register_blueprint(gm_bp, url_prefix='/gm')
