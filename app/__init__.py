@@ -4,6 +4,7 @@ from app.routes.CodeLanguageChanger import clc_bp
 from app.routes.GestureModule import gm_bp
 from app.routes.SummarizerChatbot import chatbot_bp
 from app.routes.HealthCheck import health_bp
+from app.routes.VideoTranscription import vt_bp
 from flask_cors import CORS
 
 
@@ -23,6 +24,7 @@ def create_app():
     app.register_blueprint(gm_bp, url_prefix='/gm')
     app.register_blueprint(chatbot_bp, url_prefix='/sc')
     app.register_blueprint(health_bp)
+    app.register_blueprint(vt_bp, url_prefix='/vt')
     # Import and register Blueprints AFTER the app is created
     
     # You can register more blueprints here if you want:
