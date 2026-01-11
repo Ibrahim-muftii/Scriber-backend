@@ -173,17 +173,19 @@ def upload_videos():
             print("Missing authentication headers")
             return jsonify({'error': 'Missing authentication headers'}), 401
         
-        # Handle timestamp in milliseconds (convert to seconds)
-        if len(timestamp) > 10:  # Milliseconds format
-            timestamp = str(int(timestamp) // 1000)
-            print(f"Converted millisecond timestamp to seconds: {timestamp}")
+        # Get the payload (user ID) from request form data
+        # Frontend sends this as part of the signature
+        user_id = request.form.get('userId', '')
+        print(f"User ID from request: '{user_id}'")
         
-        # For file uploads, we verify with empty payload
-        if not verify("", timestamp, signature):
-            print(f"HMAC verification failed for timestamp: {timestamp}")
+        # Verify with the actual payload (user ID)
+        if not verify(user_id, timestamp, signature):
+            print(f"HMAC verification failed")
+            print(f"  Expected payload: '{user_id}'")
+            print(f"  Timestamp: {timestamp}")
             return jsonify({'error': 'Invalid signature'}), 401
         
-        print("HMAC verification successful")
+        print("✓ HMAC verification successful")
         
         # Get uploaded files
         files = request.files.getlist('videos')
