@@ -104,12 +104,15 @@ def extract_audio_from_video(video_path, audio_output_path=None):
         raise e
 
 
-def extract_thumbnail(video_path):
+def extract_thumbnail(video_path, max_width=160, max_height=90, quality=60):
     """
-    Extract first frame from video and return as base64 string.
+    Extract first frame from video and return as compressed base64 string.
     
     Args:
         video_path: Path to video file
+        max_width: Maximum thumbnail width (default 160px)
+        max_height: Maximum thumbnail height (default 90px)
+        quality: JPEG quality 1-100 (default 60, lower = smaller file)
         
     Returns:
         str: Base64 encoded thumbnail as data URI, or None on failure
@@ -120,9 +123,23 @@ def extract_thumbnail(video_path):
         cap.release()
         
         if ret:
-            # Encode frame as JPEG
-            _, buffer = cv2.imencode('.jpg', frame)
+            # Get original dimensions
+            height, width = frame.shape[:2]
+            
+            # Calculate scaling to fit within max dimensions while maintaining aspect ratio
+            scale = min(max_width / width, max_height / height)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            
+            # Resize frame
+            resized = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
+            # Encode as JPEG with compression
+            encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+            _, buffer = cv2.imencode('.jpg', resized, encode_params)
+            
             thumbnail_base64 = base64.b64encode(buffer).decode('utf-8')
+            print(f"Thumbnail size: {len(thumbnail_base64)} chars ({new_width}x{new_height})")
             return f"data:image/jpeg;base64,{thumbnail_base64}"
         return None
     except Exception as e:
