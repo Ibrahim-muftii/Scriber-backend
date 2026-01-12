@@ -25,7 +25,7 @@ processing_results = {}
 processing_lock = threading.Lock()
 
 
-def process_single_video(video_file, video_id):
+def process_single_video(video_file, video_id, record_id=None):
     """
     Process a single video in background thread.
     Extracts thumbnail, audio, transcribes, and summarizes.
@@ -33,6 +33,7 @@ def process_single_video(video_file, video_id):
     Args:
         video_file: Tuple of (file_path, original_filename, file_size_mb)
         video_id: Unique identifier for this video
+        record_id: Database record ID for updating frontend
     """
     file_path, original_filename, file_size_mb = video_file
     audio_path = None
@@ -68,6 +69,7 @@ def process_single_video(video_file, video_id):
             processing_results[video_id] = {
                 'status': 'completed',
                 'filename': original_filename,
+                'recordId': record_id,
                 'thumbnail': thumbnail,
                 'transcription': transcription,
                 'summary': summary,
@@ -83,6 +85,7 @@ def process_single_video(video_file, video_id):
             processing_results[video_id] = {
                 'status': 'error',
                 'filename': original_filename,
+                'recordId': record_id,
                 'error': str(e),
                 'file_size_mb': round(file_size_mb, 2)
             }
@@ -187,6 +190,16 @@ def upload_videos():
         
         print("✓ HMAC verification successful")
         
+        # Parse recordIds from form data
+        record_ids_json = request.form.get('recordIds', '[]')
+        try:
+            import json
+            record_ids = json.loads(record_ids_json)
+            print(f"Record IDs from request: {record_ids}")
+        except:
+            record_ids = []
+            print("Could not parse recordIds, using empty list")
+        
         # Get uploaded files
         files = request.files.getlist('videos')
         
@@ -195,9 +208,10 @@ def upload_videos():
         
         valid_videos = []
         rejected_videos = []
+        valid_record_ids = []
         
         # Validate and save files
-        for file in files:
+        for file_idx, file in enumerate(files):
             is_valid, error_msg = validate_video_file(file)
             
             if not is_valid:
@@ -213,6 +227,9 @@ def upload_videos():
                     file, 
                     'uploads/videos'
                 )
+                # Get corresponding record_id if available
+                record_id = record_ids[file_idx] if file_idx < len(record_ids) else None
+                valid_record_ids.append(record_id)
                 valid_videos.append((file_path, original_filename, file_size_mb))
             except Exception as e:
                 rejected_videos.append({
@@ -242,10 +259,13 @@ def upload_videos():
                     'filename': video_file[1]
                 }
             
+            # Get corresponding record_id
+            record_id = valid_record_ids[idx] if idx < len(valid_record_ids) else None
+            
             # Start background thread
             thread = threading.Thread(
                 target=process_single_video,
-                args=(video_file, video_id),
+                args=(video_file, video_id, record_id),
                 daemon=True
             )
             thread.start()
