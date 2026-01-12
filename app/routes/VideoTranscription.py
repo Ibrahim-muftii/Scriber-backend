@@ -133,7 +133,7 @@ def generate_summary(content):
     """
     
     try:
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemma-3-27b-it")
         summarization = model.generate_content(prompt).text
         # Remove markdown code blocks if present
         import re

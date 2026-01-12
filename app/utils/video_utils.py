@@ -86,11 +86,11 @@ def extract_audio_from_video(video_path, audio_output_path=None):
         command = [
             'ffmpeg',
             '-i', video_path,
-            '-vn',  # No video
-            '-acodec', 'pcm_s16le',  # PCM 16-bit
-            '-ar', '16000',  # 16kHz sample rate (good for Whisper)
-            '-ac', '1',  # Mono
-            '-y',  # Overwrite output file
+            '-vn', 
+            '-acodec', 'pcm_s16le', 
+            '-ar', '16000', 
+            '-ac', '1',
+            '-y', 
             audio_output_path
         ]
         
