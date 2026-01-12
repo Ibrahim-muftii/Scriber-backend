@@ -59,8 +59,7 @@ def process_single_video(video_file, video_id, record_id=None):
         
         # Summarize using Gemini
         print(f"Generating summary for {original_filename}")
-        # summary = generate_summary(transcription)
-        summary = ""  # Summary generation disabled
+        summary = generate_summary(transcription)
         
         processing_time = round(time.time() - start_time, 2)
         
