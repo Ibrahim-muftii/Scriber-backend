@@ -25,15 +25,16 @@ processing_results = {}
 processing_lock = threading.Lock()
 
 
-def process_single_video(video_file, video_id, record_id=None):
+def process_single_video(video_file, video_id, record_id=None, is_subscribed=True):
     """
     Process a single video in background thread.
-    Extracts thumbnail, audio, transcribes, and summarizes.
+    Extracts thumbnail, audio, transcribes, and summarizes (Premium only).
     
     Args:
         video_file: Tuple of (file_path, original_filename, file_size_mb)
         video_id: Unique identifier for this video
         record_id: Database record ID for updating frontend
+        is_subscribed: Whether user has Premium subscription (for summarization)
     """
     file_path, original_filename, file_size_mb = video_file
     audio_path = None
@@ -57,9 +58,13 @@ def process_single_video(video_file, video_id, record_id=None):
         if not transcription:
             raise Exception("Transcription returned empty result")
         
-        # Summarize using Gemini
-        print(f"Generating summary for {original_filename}")
-        summary = generate_summary(transcription)
+        # Summarize using Gemini (Premium users only)
+        summary = None
+        if is_subscribed:
+            print(f"Generating summary for {original_filename} (Premium user)")
+            summary = generate_summary(transcription)
+        else:
+            print(f"Skipping summary for {original_filename} (Free user)")
         
         processing_time = round(time.time() - start_time, 2)
         
@@ -199,6 +204,10 @@ def upload_videos():
             record_ids = []
             print("Could not parse recordIds, using empty list")
         
+        # Get subscription status - only Premium users get summarization
+        is_subscribed = request.form.get('isSubscribed', 'false').lower() == 'true'
+        print(f"Is Subscribed (Premium): {is_subscribed}")
+        
         # Get uploaded files
         files = request.files.getlist('videos')
         
@@ -264,7 +273,7 @@ def upload_videos():
             # Start background thread
             thread = threading.Thread(
                 target=process_single_video,
-                args=(video_file, video_id, record_id),
+                args=(video_file, video_id, record_id, is_subscribed),
                 daemon=True
             )
             thread.start()
