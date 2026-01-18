@@ -142,6 +142,15 @@ def get_transcription():
             if not transcript_data:
                 raise Exception("No transcript data returned.")
 
+            # Calculate duration from the last segment
+            if transcript_data:
+                last_segment = transcript_data[-1]
+                if isinstance(last_segment, dict):
+                    duration = last_segment.get('start', 0) + last_segment.get('duration', 0)
+                elif hasattr(last_segment, 'start') and hasattr(last_segment, 'duration'):
+                    duration = last_segment.start + last_segment.duration
+                duration = round(duration, 2)
+
             # Process Result (Handle dicts vs objects)
             text_parts = []
             for t in transcript_data:
