@@ -225,7 +225,7 @@ def get_summary_of_the_video():
     """
 
     genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel("gemma-3-27b-it")
     summarization = model.generate_content(prompt).text
     cleanedSummarization = strip_summary_markdowns(summarization)
 
